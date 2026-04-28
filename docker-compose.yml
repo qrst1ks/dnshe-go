@@ -6,4 +6,4 @@ services:
     ports:
       - "9876:9876"
     volumes:
-      - ./data:/app/data
+      - ./data:/data

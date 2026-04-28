@@ -14,8 +14,8 @@ FROM alpine:3.22
 RUN apk add --no-cache ca-certificates && adduser -D -H -u 10001 app
 WORKDIR /app
 COPY --from=build /out/dnshe-go /usr/local/bin/dnshe-go
-RUN mkdir -p /app/data && chown -R app:app /app
+RUN mkdir -p /data && chown -R app:app /app /data
 USER app
 EXPOSE 9876
 ENTRYPOINT ["dnshe-go"]
-CMD ["-l", ":9876", "-c", "/app/data/config.json"]
+CMD ["-l", ":9876", "-c", "/data/config.json"]

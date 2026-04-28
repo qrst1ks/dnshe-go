@@ -44,7 +44,7 @@ docker run -d \
   --name dnshe-go \
   --restart unless-stopped \
   -p 9876:9876 \
-  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/data:/data" \
   ghcr.io/qrst1ks/dnshe-go:latest
 ```
 
