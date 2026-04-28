@@ -1,5 +1,7 @@
 /data/
 /dnshe-go
 /bin/
+/build/
+/dist/
 *.tmp
 .DS_Store

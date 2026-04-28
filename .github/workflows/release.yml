@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME:-dev}"
+          mkdir -p dist build
+
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r goos goarch <<< "$target"
+            ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+
+            name="dnshe-go_${version}_${goos}_${goarch}"
+            pkg="build/${name}"
+            mkdir -p "$pkg"
+
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -ldflags="-s -w -X main.version=${version}" -o "${pkg}/dnshe-go${ext}" .
+
+            cp README.md "$pkg/"
+
+            if [ "$goos" = "windows" ]; then
+              (cd build && zip -qr "../dist/${name}.zip" "$name")
+            else
+              tar -C build -czf "dist/${name}.tar.gz" "$name"
+            fi
+          done
+
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
