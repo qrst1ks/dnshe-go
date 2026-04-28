@@ -28,14 +28,14 @@ Web UI 不包含登录系统。`API Secret` 使用前端遮罩显示，不触发
 make build
 ```
 
-生成的启动文件位于 `bin/dnshe-go`。直接双击这个文件会启动服务，并自动打开 Web UI。
+生成的启动文件位于项目根目录的 `dnshe-go`。直接双击这个文件会启动服务，并自动打开 Web UI。
 
 双击启动时，配置文件会保存在可执行文件同目录下的 `data/config.json`。
 
 命令行启动也可以显式指定监听地址和配置文件：
 
 ```bash
-./bin/dnshe-go -l 127.0.0.1:9876 -c data/config.json
+./dnshe-go -l 127.0.0.1:9876 -c data/config.json
 ```
 
 ## 单次同步
