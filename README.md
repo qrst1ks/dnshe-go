@@ -100,9 +100,9 @@ docker compose up -d --force-recreate dnshe-go
 
 如果无法拉取 GHCR 镜像，请确认 GitHub Packages 中的 package visibility 已设置为 Public。
 
-## 二进制启动
+## 软件下载地址
 
-不使用 Docker 时，可以从 GitHub Releases 下载对应系统的压缩包：
+不使用 Docker 时，可以从发布页下载对应系统的压缩包：
 
 <https://github.com/qrst1ks/dnshe-go/releases>
 
@@ -133,6 +133,29 @@ Release 文件说明：
 - `linux_amd64`：普通 x86_64 Linux
 - `linux_arm64`：ARM64 Linux
 - `windows_amd64`：64 位 Windows
+
+## 源码启动
+
+也可以通过 `git clone` 获取源码后在本机编译启动。需要先安装 Go。
+
+```bash
+git clone https://github.com/qrst1ks/dnshe-go.git
+cd dnshe-go
+make build
+./dnshe-go
+```
+
+启动后打开：
+
+```text
+http://127.0.0.1:9999
+```
+
+源码启动时，配置文件默认保存在项目目录：
+
+```text
+data/config.json
+```
 
 ## Web UI 配置
 
