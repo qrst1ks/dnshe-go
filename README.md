@@ -2,7 +2,7 @@
 
 `dnshe-go` 是一个面向 DNSHE 的轻量 IPv6 DDNS 服务，用于自动更新 DNSHE 的 IPv6 `AAAA` 记录。
 
-它直接获取本机公网 IPv6，并调用 DNSHE API 更新域名记录。部署后只需要运行一个服务，不需要额外 callback 程序。
+它直接获取本机公网 IPv6，并调用 DNSHE API 更新域名记录。部署后只需要运行一个服务。
 
 ## 适用场景
 
@@ -13,11 +13,11 @@
 
 ## 与 ddns-go 的关系
 
-`dnshe-go` 不是 `ddns-go` 的 fork，也不依赖 `ddns-go`。
+`dnshe-go` 基于 `ddns-go` 的 DDNS 工作方式实现，面向 DNSHE 的 IPv6 `AAAA` 记录更新场景做了简化和整合。
 
-之前可以通过 `ddns-go + dnshe-ddns-go-callback` 实现 DNSHE 更新：`ddns-go` 负责检测 IP 变化，callback 服务负责调用 DNSHE API。这个方式需要同时维护两个服务。
+它保留了 DDNS 服务中常用的 IP 检测、周期同步、手动同步和 Web UI 配置思路，同时直接内置 DNSHE 更新流程。
 
-`dnshe-go` 把 IPv6 获取、DNSHE 更新、Web UI 和自动同步合并到一个程序里，因此只需要部署 `dnshe-go`。
+因此，如果你之前熟悉 `ddns-go`，可以把 `dnshe-go` 理解为一个面向 DNSHE 和 IPv6 `AAAA` 记录的轻量实现。
 
 ## 功能
 
@@ -201,7 +201,6 @@ data/config.json
 - Releases：<https://github.com/qrst1ks/dnshe-go/releases>
 - Docker 镜像：`ghcr.io/qrst1ks/dnshe-go:latest`
 - ddns-go：<https://github.com/jeessy2/ddns-go>
-- 原 callback 项目：<https://github.com/qrst1ks/dnshe-ddns-go-callback>
 - DNSHE：<https://www.dnshe.com>
 
 ## 许可证
