@@ -12,17 +12,16 @@
 - 支持 `DNSHE_API_KEY`、`DNSHE_API_SECRET`、`DNSHE_API_BASE_URL` 环境变量覆盖配置文件。
 - 默认同步间隔为 300 秒，默认 TTL 为 600。
 
-## 本地运行
+## 使用方式
 
-```bash
-go run . -l 127.0.0.1:9876 -c data/config.json
-```
+这个项目只保留两种使用方式：
 
-打开 `http://127.0.0.1:9876` 填写 DNSHE API、域名和 IP 获取方式。
+1. 直接运行二进制文件。
+2. 通过 Docker 镜像部署。
 
-Web UI 不包含登录系统。`API Secret` 使用前端遮罩显示，不触发浏览器登录表单。
+Web UI 不包含登录系统。打开页面后填写 DNSHE API、域名和 IP 获取方式即可。
 
-## 构建二进制
+## 二进制启动
 
 ```bash
 make build
@@ -32,19 +31,15 @@ make build
 
 双击启动时，配置文件会保存在可执行文件同目录下的 `data/config.json`。
 
-命令行启动也可以显式指定监听地址和配置文件：
+也可以从命令行启动同一个二进制文件：
 
 ```bash
 ./dnshe-go -l 127.0.0.1:9876 -c data/config.json
 ```
 
-## 单次同步
+打开 `http://127.0.0.1:9876` 进入 Web UI。
 
-```bash
-DNSHE_API_KEY=xxx DNSHE_API_SECRET=yyy go run . -once -c data/config.json
-```
-
-## Docker
+## Docker 部署
 
 直接拉取镜像启动：
 
@@ -66,5 +61,19 @@ docker compose up -d
 配置文件保存在 `./data/config.json`，文件权限为 `0600`。
 
 镜像发布到 `ghcr.io/qrst1ks/dnshe-go`，支持 `linux/amd64` 和 `linux/arm64`。推送 `main` 分支后会自动发布 `latest`，推送 `v*` tag 后会发布对应版本标签。
+
+## 目录结构
+
+```text
+.
+├── dnshe-go              # 本地构建出的可双击启动二进制，已被 git 忽略
+├── Dockerfile            # Docker 镜像构建
+├── docker-compose.yml    # Docker Compose 部署
+├── Makefile              # 构建二进制
+├── README.md
+├── go.mod
+├── main.go
+└── internal/             # 服务源码
+```
 
 这个项目把这段流程内置在同步循环里：IP 变化后直接查询 DNSHE 并更新记录，所以部署时只需要运行一个服务。
