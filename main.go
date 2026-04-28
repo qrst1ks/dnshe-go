@@ -7,7 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -62,6 +65,14 @@ func main() {
 				stop()
 			}
 		}()
+		if launchedByDoubleClick() {
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				if err := openBrowser("http://" + displayListen(*listen)); err != nil {
+					logger.Addf("WARN", "open browser failed: %v", err)
+				}
+			}()
+		}
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -84,6 +95,11 @@ func main() {
 func defaultConfigPath() string {
 	if v := strings.TrimSpace(os.Getenv("CONFIG_PATH")); v != "" {
 		return v
+	}
+	if launchedByDoubleClick() {
+		if exe, err := os.Executable(); err == nil {
+			return filepath.Join(filepath.Dir(exe), "data", "config.json")
+		}
 	}
 	return "data/config.json"
 }
@@ -108,4 +124,21 @@ func displayListen(addr string) string {
 		return "127.0.0.1:" + strings.TrimPrefix(addr, "0.0.0.0:")
 	}
 	return addr
+}
+
+func launchedByDoubleClick() bool {
+	return len(os.Args) == 1
+}
+
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }
