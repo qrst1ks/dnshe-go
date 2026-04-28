@@ -1,0 +1,5 @@
+/data/
+/dnshe-go
+*.tmp
+.DS_Store
+

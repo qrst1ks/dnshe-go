@@ -1,0 +1,10 @@
+services:
+  dnshe-go:
+    build: .
+    container_name: dnshe-go
+    restart: unless-stopped
+    ports:
+      - "9876:9876"
+    volumes:
+      - ./data:/app/data
+
