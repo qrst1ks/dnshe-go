@@ -8,7 +8,7 @@ build:
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) .
 
 run:
-	go run . -l 127.0.0.1:9876 -c data/config.json
+	go run . -l 127.0.0.1:9999 -c data/config.json
 
 test:
 	go test ./...

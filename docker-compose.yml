@@ -4,6 +4,6 @@ services:
     container_name: dnshe-go
     restart: unless-stopped
     ports:
-      - "9876:9876"
+      - "9999:9999"
     volumes:
       - ./data:/data

@@ -16,6 +16,6 @@ WORKDIR /app
 COPY --from=build /out/dnshe-go /usr/local/bin/dnshe-go
 RUN mkdir -p /data && chown -R app:app /app /data
 USER app
-EXPOSE 9876
+EXPOSE 9999
 ENTRYPOINT ["dnshe-go"]
-CMD ["-l", ":9876", "-c", "/data/config.json"]
+CMD ["-l", ":9999", "-c", "/data/config.json"]

@@ -113,7 +113,7 @@ func defaultListen() string {
 			return "0.0.0.0:" + v
 		}
 	}
-	return "127.0.0.1:9876"
+	return "127.0.0.1:9999"
 }
 
 func displayListen(addr string) string {
