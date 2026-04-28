@@ -1,10 +1,9 @@
 services:
   dnshe-go:
-    build: .
+    image: ghcr.io/qrst1ks/dnshe-go:latest
     container_name: dnshe-go
     restart: unless-stopped
     ports:
       - "9876:9876"
     volumes:
       - ./data:/app/data
-
