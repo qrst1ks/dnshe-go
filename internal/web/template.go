@@ -448,6 +448,7 @@ const indexHTML = `<!doctype html>
       </div>
       <div class="actions">
         <button id="refresh" type="button">刷新</button>
+        <button id="self-check" type="button">自检</button>
         <button id="run" class="primary" type="button">立即同步</button>
         <button id="save" class="primary" type="button">保存配置</button>
       </div>
@@ -916,6 +917,36 @@ const indexHTML = `<!doctype html>
       }
     }
 
+    async function selfCheck() {
+      const btn = $("self-check");
+      btn.disabled = true;
+      message.className = "message";
+      message.textContent = "自检中...";
+      try {
+        const res = await fetch("/api/selfcheck", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.msg || "自检失败");
+        const rows = Array.isArray(data.results) ? data.results : [];
+        const problems = rows
+          .filter((item) => item.status === "failed")
+          .map((item) => item.name + "： " + item.message);
+        showProblems(problems);
+        if (data.status === "ok") {
+          message.className = "message ok";
+          message.textContent = "自检通过（" + rows.length + " 项）";
+        } else {
+          message.className = "message warn";
+          message.textContent = "自检发现问题（" + problems.length + " 项）";
+        }
+        await refresh();
+      } catch (err) {
+        message.className = "message bad";
+        message.textContent = "自检失败：" + (err && err.message ? err.message : err);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     async function clearLogs() {
       await fetch("/api/logs/clear", { method: "POST" });
       await refresh();
@@ -937,6 +968,7 @@ const indexHTML = `<!doctype html>
       $("toggle-secret").textContent = hidden ? "显示" : "隐藏";
     });
     $("save").addEventListener("click", save);
+    $("self-check").addEventListener("click", selfCheck);
     $("run").addEventListener("click", runNow);
     $("refresh").addEventListener("click", () => refresh({ populate: true }));
     $("open-logs").addEventListener("click", () => {

@@ -6,11 +6,14 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qrst1ks/dnshe-go/internal/config"
 	"github.com/qrst1ks/dnshe-go/internal/ddns"
+	"github.com/qrst1ks/dnshe-go/internal/dnshe"
 	"github.com/qrst1ks/dnshe-go/internal/logbuf"
 )
 
@@ -55,6 +58,7 @@ func NewServer(listen string, store *config.Store, syncer *ddns.Syncer, logs *lo
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/interfaces", s.handleInterfaces)
+	mux.HandleFunc("/api/selfcheck", s.handleSelfCheck)
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/logs/clear", s.handleClearLogs)
 	s.Server = http.Server{
@@ -66,6 +70,97 @@ func NewServer(listen string, store *config.Store, syncer *ddns.Syncer, logs *lo
 		IdleTimeout:       60 * time.Second,
 	}
 	return s
+}
+
+type selfCheckItem struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+func (s *Server) handleSelfCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "msg": "method not allowed"})
+		return
+	}
+
+	cfg := s.store.Get()
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	items := make([]selfCheckItem, 0, 8)
+	add := func(name, status, message string) {
+		items = append(items, selfCheckItem{Name: name, Status: status, Message: message})
+	}
+
+	if strings.TrimSpace(cfg.DNSHE.APIKey) == "" {
+		add("DNSHE API Key", "failed", "未配置")
+	} else {
+		add("DNSHE API Key", "ok", "已配置")
+	}
+	if strings.TrimSpace(cfg.DNSHE.APISecret) == "" {
+		add("DNSHE API Secret", "failed", "未配置")
+	} else {
+		add("DNSHE API Secret", "ok", "已配置")
+	}
+
+	ip, err := ddns.ResolveIPv6(ctx, cfg.IPv6)
+	if err != nil {
+		add("IPv6 获取", "failed", err.Error())
+	} else {
+		add("IPv6 获取", "ok", ip)
+	}
+
+	domains := cfg.IPv6.DomainsClean()
+	if len(domains) == 0 {
+		add("域名配置", "failed", "未配置域名")
+	} else {
+		sort.Strings(domains)
+		add("域名配置", "ok", "已配置 "+strconv.Itoa(len(domains))+" 个域名")
+	}
+
+	if strings.TrimSpace(cfg.DNSHE.APIKey) != "" && strings.TrimSpace(cfg.DNSHE.APISecret) != "" && len(domains) > 0 {
+		client := dnshe.NewClient(cfg.DNSHE)
+		for _, domain := range domains {
+			subID, subErr := client.FindSubdomain(ctx, domain)
+			if subErr != nil {
+				add("DNSHE 子域名 "+domain, "failed", subErr.Error())
+				continue
+			}
+			if subID == 0 {
+				add("DNSHE 子域名 "+domain, "failed", "未找到该子域名")
+				continue
+			}
+			record, recErr := client.FindRecord(ctx, subID, "AAAA")
+			if recErr != nil {
+				add("DNSHE AAAA "+domain, "failed", recErr.Error())
+				continue
+			}
+			if record.ID == 0 {
+				add("DNSHE AAAA "+domain, "failed", "未找到 AAAA 记录")
+				continue
+			}
+			add("DNSHE AAAA "+domain, "ok", "record_id="+strconv.Itoa(record.ID))
+		}
+	}
+
+	overall := "ok"
+	for _, item := range items {
+		if item.Status == "failed" {
+			overall = "failed"
+			break
+		}
+	}
+	if overall == "ok" && len(items) > 0 {
+		s.logs.Addf("INFO", "self-check passed")
+	} else {
+		s.logs.Addf("WARN", "self-check found issues")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"status":  overall,
+		"results": items,
+	})
 }
 
 func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request) {
