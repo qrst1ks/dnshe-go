@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"html/template"
 	"net"
@@ -14,6 +15,9 @@ import (
 	"github.com/qrst1ks/dnshe-go/internal/logbuf"
 )
 
+//go:embed assets/*
+var webAssets embed.FS
+
 type Server struct {
 	http.Server
 	store  *config.Store
@@ -23,18 +27,33 @@ type Server struct {
 }
 
 type publicConfig struct {
-	IntervalSeconds     int             `json:"interval_seconds"`
-	TTL                 int             `json:"ttl"`
-	DNSHE               publicDNSHE     `json:"dnshe"`
-	IPv6                config.IPConfig `json:"ipv6"`
-	APIKeyConfigured    bool            `json:"api_key_configured"`
-	APISecretConfigured bool            `json:"api_secret_configured"`
+	IntervalSeconds int              `json:"interval_seconds"`
+	TTL             int              `json:"ttl"`
+	DNSHE           publicDNSHE      `json:"dnshe"`
+	Cloudflare      publicCloudflare `json:"cloudflare"`
+	IPv6            publicIPConfig   `json:"ipv6"`
 }
 
 type publicDNSHE struct {
-	APIKeyMasked    string `json:"api_key_masked"`
-	APISecretMasked string `json:"api_secret_masked"`
-	APIBaseURL      string `json:"api_base_url"`
+	Enable          bool     `json:"enable"`
+	APIKeyMasked    string   `json:"api_key_masked"`
+	APISecretMasked string   `json:"api_secret_masked"`
+	APIBaseURL      string   `json:"api_base_url"`
+	Domains         []string `json:"domains"`
+}
+
+type publicCloudflare struct {
+	Enable         bool     `json:"enable"`
+	APITokenMasked string   `json:"api_token_masked"`
+	APIBaseURL     string   `json:"api_base_url"`
+	Domains        []string `json:"domains"`
+}
+
+type publicIPConfig struct {
+	Source    string   `json:"source"`
+	URLs      []string `json:"urls"`
+	Interface string   `json:"interface"`
+	Command   string   `json:"command"`
 }
 
 type netInterfaceInfo struct {
@@ -51,8 +70,14 @@ func NewServer(listen string, store *config.Store, syncer *ddns.Syncer, logs *lo
 		tmpl:   template.Must(template.New("index").Parse(indexHTML)),
 	}
 	mux := http.NewServeMux()
+	assets := http.FileServer(http.FS(webAssets))
+	mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		assets.ServeHTTP(w, r)
+	})
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/secret", s.handleSecret)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/interfaces", s.handleInterfaces)
 	mux.HandleFunc("/api/run", s.handleRun)
@@ -98,6 +123,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleSecret(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "msg": "method not allowed"})
+		return
+	}
+	cfg := s.store.Get()
+	var value string
+	switch r.URL.Query().Get("id") {
+	case "dnshe-api-key":
+		value = cfg.DNSHE.APIKey
+	case "dnshe-api-secret":
+		value = cfg.DNSHE.APISecret
+	case "cloudflare-api-token":
+		value = cfg.Cloudflare.APIToken
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "msg": "unknown secret"})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "value": value})
+}
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "msg": "method not allowed"})
@@ -114,6 +161,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if config.IsMaskedSecret(next.DNSHE.APISecret) {
 		next.DNSHE.APISecret = current.DNSHE.APISecret
+	}
+	if config.IsMaskedSecret(next.Cloudflare.APIToken) {
+		next.Cloudflare.APIToken = current.Cloudflare.APIToken
 	}
 	next.Normalize()
 	if problems := validateConfig(next); len(problems) > 0 {
@@ -152,13 +202,24 @@ func makePublicConfig(cfg config.Config) publicConfig {
 		IntervalSeconds: cfg.IntervalSeconds,
 		TTL:             cfg.TTL,
 		DNSHE: publicDNSHE{
+			Enable:          cfg.DNSHE.Enable,
 			APIKeyMasked:    config.MaskSecret(cfg.DNSHE.APIKey),
 			APISecretMasked: config.MaskSecret(cfg.DNSHE.APISecret),
 			APIBaseURL:      cfg.DNSHE.APIBaseURL,
+			Domains:         cfg.DNSHE.DomainsClean(),
 		},
-		IPv6:                cfg.IPv6,
-		APIKeyConfigured:    strings.TrimSpace(cfg.DNSHE.APIKey) != "",
-		APISecretConfigured: strings.TrimSpace(cfg.DNSHE.APISecret) != "",
+		Cloudflare: publicCloudflare{
+			Enable:         cfg.Cloudflare.Enable,
+			APITokenMasked: config.MaskSecret(cfg.Cloudflare.APIToken),
+			APIBaseURL:     cfg.Cloudflare.APIBaseURL,
+			Domains:        cfg.Cloudflare.DomainsClean(),
+		},
+		IPv6: publicIPConfig{
+			Source:    cfg.IPv6.Source,
+			URLs:      cfg.IPv6.URLs,
+			Interface: cfg.IPv6.Interface,
+			Command:   cfg.IPv6.Command,
+		},
 	}
 }
 
@@ -170,36 +231,40 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 func validateConfig(cfg config.Config) []string {
 	var problems []string
-	if strings.TrimSpace(cfg.DNSHE.APIKey) == "" {
-		problems = append(problems, "DNSHE API Key 不能为空")
+	if !cfg.DNSHE.Enable && !cfg.Cloudflare.Enable {
+		problems = append(problems, "至少需要启用一个 DNS 服务商")
 	}
-	if strings.TrimSpace(cfg.DNSHE.APISecret) == "" {
-		problems = append(problems, "DNSHE API Secret 不能为空")
-	}
-	if !cfg.IPv6.Enable {
-		problems = append(problems, "IPv6 同步必须启用")
-	}
-	validateIPConfig := func(name string, ipCfg config.IPConfig) {
-		if !ipCfg.Enable {
-			return
+	if cfg.DNSHE.Enable {
+		if strings.TrimSpace(cfg.DNSHE.APIKey) == "" {
+			problems = append(problems, "DNSHE API Key 不能为空")
 		}
-		if len(ipCfg.DomainsClean()) == 0 {
-			problems = append(problems, name+" 域名不能为空")
+		if strings.TrimSpace(cfg.DNSHE.APISecret) == "" {
+			problems = append(problems, "DNSHE API Secret 不能为空")
 		}
-		switch ipCfg.Source {
-		case "url":
-			if len(ipCfg.URLs) == 0 {
-				problems = append(problems, name+" 使用 URL 来源时 URL 不能为空")
-			}
-		case "cmd":
-			if strings.TrimSpace(ipCfg.Command) == "" {
-				problems = append(problems, name+" 使用命令来源时命令不能为空")
-			}
-		case "interface":
-			// 网卡名允许为空，表示自动选择活动网卡。
+		if len(cfg.DNSHE.DomainsClean()) == 0 {
+			problems = append(problems, "DNSHE 域名不能为空")
 		}
 	}
-	validateIPConfig("IPv6", cfg.IPv6)
+	if cfg.Cloudflare.Enable {
+		if strings.TrimSpace(cfg.Cloudflare.APIToken) == "" {
+			problems = append(problems, "Cloudflare API Token 不能为空")
+		}
+		if len(cfg.Cloudflare.DomainsClean()) == 0 {
+			problems = append(problems, "Cloudflare 域名不能为空")
+		}
+	}
+	switch cfg.IPv6.Source {
+	case "url":
+		if len(cfg.IPv6.URLs) == 0 {
+			problems = append(problems, "IPv6 使用 URL 来源时 URL 不能为空")
+		}
+	case "cmd":
+		if strings.TrimSpace(cfg.IPv6.Command) == "" {
+			problems = append(problems, "IPv6 使用命令来源时命令不能为空")
+		}
+	case "interface":
+		// 网卡名允许为空，表示自动选择活动网卡。
+	}
 	return problems
 }
 

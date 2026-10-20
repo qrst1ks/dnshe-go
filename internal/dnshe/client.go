@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/qrst1ks/dnshe-go/internal/config"
+	"github.com/qrst1ks/dnshe-go/internal/provider"
 )
 
 type Client struct {
@@ -45,15 +46,6 @@ type Record struct {
 	Content string `json:"content"`
 }
 
-type UpdateResult struct {
-	Domain     string `json:"domain"`
-	RecordType string `json:"record_type"`
-	RecordID   int    `json:"record_id"`
-	OldIP      string `json:"old_ip,omitempty"`
-	NewIP      string `json:"new_ip"`
-	Status     string `json:"status"`
-}
-
 func NewClient(cfg config.DNSHEConfig) *Client {
 	baseURL := strings.TrimSpace(cfg.APIBaseURL)
 	if baseURL == "" {
@@ -69,8 +61,8 @@ func NewClient(cfg config.DNSHEConfig) *Client {
 	}
 }
 
-func (c *Client) EnsureRecord(ctx context.Context, domain string, recordType string, ip string, ttl int) (UpdateResult, error) {
-	result := UpdateResult{
+func (c *Client) EnsureRecord(ctx context.Context, domain string, recordType string, ip string, ttl int) (provider.Result, error) {
+	result := provider.Result{
 		Domain:     domain,
 		RecordType: strings.ToUpper(recordType),
 		NewIP:      ip,
@@ -91,18 +83,18 @@ func (c *Client) EnsureRecord(ctx context.Context, domain string, recordType str
 	if record.ID == 0 {
 		return result, fmt.Errorf("record not found: %s %s", domain, result.RecordType)
 	}
-	result.RecordID = record.ID
+	result.RecordID = strconv.Itoa(record.ID)
 	result.OldIP = record.Content
 
 	if record.Content == ip {
-		result.Status = "unchanged"
+		result.Status = provider.StatusUnchanged
 		return result, nil
 	}
 
 	if _, err := c.UpdateRecord(ctx, record.ID, ip, ttl); err != nil {
 		return result, err
 	}
-	result.Status = "updated"
+	result.Status = provider.StatusUpdated
 	return result, nil
 }
 

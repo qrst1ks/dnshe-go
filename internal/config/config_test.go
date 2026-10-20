@@ -25,10 +25,16 @@ func TestNormalizeDefaults(t *testing.T) {
 	if cfg.DNSHE.APIBaseURL != DefaultDNSHEBaseURL {
 		t.Fatalf("base url = %q", cfg.DNSHE.APIBaseURL)
 	}
+	if cfg.DNSHE.Enable {
+		t.Fatal("DNSHE should be disabled by default")
+	}
+	if cfg.Cloudflare.Enable {
+		t.Fatal("Cloudflare should be disabled by default")
+	}
+	if cfg.Cloudflare.APIBaseURL != DefaultCloudflareAPIBase {
+		t.Fatalf("cloudflare base url = %q", cfg.Cloudflare.APIBaseURL)
+	}
 	if cfg.IPv6.Source != "url" {
 		t.Fatalf("ipv6 source = %q", cfg.IPv6.Source)
-	}
-	if !cfg.IPv6.Enable {
-		t.Fatal("ipv6 should be enabled by default")
 	}
 }

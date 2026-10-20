@@ -11,28 +11,39 @@ import (
 	"sync"
 )
 
-const DefaultDNSHEBaseURL = "https://api005.dnshe.com/index.php?m=domain_hub"
+const (
+	DefaultDNSHEBaseURL      = "https://api005.dnshe.com/index.php?m=domain_hub"
+	DefaultCloudflareAPIBase = "https://api.cloudflare.com/client/v4"
+)
 
 type Config struct {
-	IntervalSeconds int         `json:"interval_seconds"`
-	TTL             int         `json:"ttl"`
-	DNSHE           DNSHEConfig `json:"dnshe"`
-	IPv6            IPConfig    `json:"ipv6"`
+	IntervalSeconds int              `json:"interval_seconds"`
+	TTL             int              `json:"ttl"`
+	DNSHE           DNSHEConfig      `json:"dnshe"`
+	Cloudflare      CloudflareConfig `json:"cloudflare"`
+	IPv6            IPConfig         `json:"ipv6"`
 }
 
 type DNSHEConfig struct {
-	APIKey     string `json:"api_key"`
-	APISecret  string `json:"api_secret"`
-	APIBaseURL string `json:"api_base_url"`
+	Enable     bool     `json:"enable"`
+	APIKey     string   `json:"api_key"`
+	APISecret  string   `json:"api_secret"`
+	APIBaseURL string   `json:"api_base_url"`
+	Domains    []string `json:"domains"`
+}
+
+type CloudflareConfig struct {
+	Enable     bool     `json:"enable"`
+	APIToken   string   `json:"api_token"`
+	APIBaseURL string   `json:"api_base_url"`
+	Domains    []string `json:"domains"`
 }
 
 type IPConfig struct {
-	Enable    bool     `json:"enable"`
 	Source    string   `json:"source"`
 	URLs      []string `json:"urls"`
 	Interface string   `json:"interface"`
 	Command   string   `json:"command"`
-	Domains   []string `json:"domains"`
 }
 
 type Store struct {
@@ -48,8 +59,10 @@ func Default() Config {
 		DNSHE: DNSHEConfig{
 			APIBaseURL: DefaultDNSHEBaseURL,
 		},
+		Cloudflare: CloudflareConfig{
+			APIBaseURL: DefaultCloudflareAPIBase,
+		},
 		IPv6: IPConfig{
-			Enable:  true,
 			Source:  "url",
 			Command: DefaultIPv6Command(),
 			URLs: []string{
@@ -138,6 +151,15 @@ func (c *Config) Normalize() {
 	c.DNSHE.APIKey = strings.TrimSpace(c.DNSHE.APIKey)
 	c.DNSHE.APISecret = strings.TrimSpace(c.DNSHE.APISecret)
 	c.DNSHE.APIBaseURL = strings.TrimSpace(c.DNSHE.APIBaseURL)
+	c.DNSHE.Domains = CleanStringList(c.DNSHE.Domains)
+
+	if strings.TrimSpace(c.Cloudflare.APIBaseURL) == "" {
+		c.Cloudflare.APIBaseURL = DefaultCloudflareAPIBase
+	}
+	c.Cloudflare.APIToken = strings.TrimSpace(c.Cloudflare.APIToken)
+	c.Cloudflare.APIBaseURL = strings.TrimSpace(c.Cloudflare.APIBaseURL)
+	c.Cloudflare.Domains = CleanStringList(c.Cloudflare.Domains)
+
 	c.IPv6.Normalize()
 }
 
@@ -151,9 +173,19 @@ func (c *Config) ApplyEnv() {
 	if v := strings.TrimSpace(os.Getenv("DNSHE_API_BASE_URL")); v != "" {
 		c.DNSHE.APIBaseURL = v
 	}
+	if v := strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN")); v != "" {
+		c.Cloudflare.APIToken = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CLOUDFLARE_API_BASE_URL")); v != "" {
+		c.Cloudflare.APIBaseURL = v
+	}
 }
 
-func (c IPConfig) DomainsClean() []string {
+func (c DNSHEConfig) DomainsClean() []string {
+	return CleanStringList(c.Domains)
+}
+
+func (c CloudflareConfig) DomainsClean() []string {
 	return CleanStringList(c.Domains)
 }
 
@@ -170,7 +202,6 @@ func (c *IPConfig) Normalize() {
 		c.Command = DefaultIPv6Command()
 	}
 	c.URLs = CleanStringList(c.URLs)
-	c.Domains = CleanStringList(c.Domains)
 }
 
 func DefaultIPv6Command() string {

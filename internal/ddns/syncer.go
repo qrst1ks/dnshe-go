@@ -3,23 +3,33 @@ package ddns
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/qrst1ks/dnshe-go/internal/cloudflare"
 	"github.com/qrst1ks/dnshe-go/internal/config"
 	"github.com/qrst1ks/dnshe-go/internal/dnshe"
 	"github.com/qrst1ks/dnshe-go/internal/logbuf"
+	"github.com/qrst1ks/dnshe-go/internal/provider"
 )
 
 type RecordResult struct {
 	Time       string `json:"time"`
+	Provider   string `json:"provider"`
 	Domain     string `json:"domain"`
 	RecordType string `json:"record_type"`
 	IP         string `json:"ip"`
 	OldIP      string `json:"old_ip,omitempty"`
-	RecordID   int    `json:"record_id,omitempty"`
+	RecordID   string `json:"record_id,omitempty"`
 	Status     string `json:"status"`
 	Message    string `json:"message,omitempty"`
+}
+
+type providerJob struct {
+	name    string
+	domains []string
+	updater provider.Updater
 }
 
 type Status struct {
@@ -91,50 +101,104 @@ func (s *Syncer) RunOnce(ctx context.Context, force bool) Status {
 	}()
 
 	cfg := s.store.Get()
-	if cfg.DNSHE.APIKey == "" || cfg.DNSHE.APISecret == "" {
-		status.LastError = "DNSHE API key/secret not configured"
-		s.logs.Addf("ERROR", "%s", status.LastError)
-		return status
-	}
-
-	client := dnshe.NewClient(cfg.DNSHE)
-	s.logs.Addf("INFO", "sync started")
-	s.runIPv6(ctx, client, cfg, force, &status)
-	if status.LastError == "" {
-		s.logs.Addf("INFO", "sync finished in %dms", time.Since(started).Milliseconds())
-	}
-	return status
-}
-
-func (s *Syncer) runIPv6(ctx context.Context, client *dnshe.Client, cfg config.Config, force bool, status *Status) {
-	if !cfg.IPv6.Enable {
-		return
-	}
-	const recordType = "AAAA"
-	domains := cfg.IPv6.DomainsClean()
-	if len(domains) == 0 {
-		return
+	jobs, problems := buildProviderJobs(cfg)
+	for _, problem := range problems {
+		s.logs.Addf("ERROR", "%s", problem)
 	}
 
 	ip, err := ResolveIPv6(ctx, cfg.IPv6)
 	if err != nil {
 		msg := fmt.Sprintf("resolve IPv6 failed: %v", err)
-		status.LastError = msg
+		status.LastError = strings.Join(append(problems, msg), "; ")
 		s.logs.Addf("ERROR", "%s", msg)
-		return
+		return status
 	}
 	status.CurrentIPv6 = ip
 
-	if !force && s.cache[recordType] == ip {
-		s.logs.Addf("INFO", "IPv6 unchanged: %s", maskIP(ip))
-		return
+	if len(jobs) == 0 {
+		if len(problems) == 0 {
+			s.logs.Addf("INFO", "no DNS provider enabled, IPv6 resolved without updates")
+			return status
+		}
+		status.LastError = strings.Join(problems, "; ")
+		return status
 	}
 
-	familyOK := true
-	for _, domain := range domains {
-		result, err := client.EnsureRecord(ctx, domain, recordType, ip, cfg.TTL)
+	if !force && s.cache["AAAA"] == ip {
+		s.logs.Addf("INFO", "IPv6 unchanged: %s", maskIP(ip))
+		status.LastError = strings.Join(problems, "; ")
+		return status
+	}
+
+	s.logs.Addf("INFO", "sync started")
+	jobsOK := true
+	for _, job := range jobs {
+		ok, jobProblems := s.runIPv6(ctx, job, cfg.TTL, ip, &status)
+		if !ok {
+			jobsOK = false
+			problems = append(problems, jobProblems...)
+		}
+	}
+	if jobsOK {
+		s.cache["AAAA"] = ip
+	}
+	if len(problems) == 0 {
+		s.logs.Addf("INFO", "sync finished in %dms", time.Since(started).Milliseconds())
+	} else {
+		status.LastError = strings.Join(problems, "; ")
+	}
+	return status
+}
+
+func buildProviderJobs(cfg config.Config) ([]providerJob, []string) {
+	var jobs []providerJob
+	var problems []string
+
+	if cfg.DNSHE.Enable {
+		domains := cfg.DNSHE.DomainsClean()
+		switch {
+		case cfg.DNSHE.APIKey == "" || cfg.DNSHE.APISecret == "":
+			problems = append(problems, "DNSHE API key/secret not configured")
+		case len(domains) == 0:
+			problems = append(problems, "DNSHE has no domains configured")
+		default:
+			jobs = append(jobs, providerJob{
+				name:    "DNSHE",
+				domains: domains,
+				updater: dnshe.NewClient(cfg.DNSHE),
+			})
+		}
+	}
+
+	if cfg.Cloudflare.Enable {
+		domains := cfg.Cloudflare.DomainsClean()
+		switch {
+		case cfg.Cloudflare.APIToken == "":
+			problems = append(problems, "Cloudflare API token not configured")
+		case len(domains) == 0:
+			problems = append(problems, "Cloudflare has no domains configured")
+		default:
+			jobs = append(jobs, providerJob{
+				name:    "Cloudflare",
+				domains: domains,
+				updater: cloudflare.NewClient(cfg.Cloudflare),
+			})
+		}
+	}
+
+	return jobs, problems
+}
+
+func (s *Syncer) runIPv6(ctx context.Context, job providerJob, ttl int, ip string, status *Status) (bool, []string) {
+	const recordType = "AAAA"
+	ok := true
+	var problems []string
+
+	for _, domain := range job.domains {
+		result, err := job.updater.EnsureRecord(ctx, domain, recordType, ip, ttl)
 		record := RecordResult{
 			Time:       time.Now().Format(time.RFC3339),
+			Provider:   job.name,
 			Domain:     domain,
 			RecordType: recordType,
 			IP:         ip,
@@ -143,21 +207,24 @@ func (s *Syncer) runIPv6(ctx context.Context, client *dnshe.Client, cfg config.C
 			Status:     result.Status,
 		}
 		if err != nil {
-			familyOK = false
+			ok = false
 			record.Status = "failed"
 			record.Message = err.Error()
-			status.LastError = fmt.Sprintf("%s %s failed: %v", domain, recordType, err)
-			s.logs.Addf("ERROR", "update %s %s failed: %v", domain, recordType, err)
-		} else if result.Status == "updated" {
-			s.logs.Addf("INFO", "updated %s %s: %s -> %s", domain, recordType, maskIP(result.OldIP), maskIP(ip))
+			problems = append(problems, fmt.Sprintf("%s %s (%s) failed: %v", domain, recordType, job.name, err))
+			s.logs.Addf("ERROR", "update %s %s via %s failed: %v", domain, recordType, job.name, err)
 		} else {
-			s.logs.Addf("INFO", "unchanged %s %s: %s", domain, recordType, maskIP(ip))
+			switch result.Status {
+			case provider.StatusUpdated:
+				s.logs.Addf("INFO", "updated %s %s via %s: %s -> %s", domain, recordType, job.name, maskIP(result.OldIP), maskIP(ip))
+			case provider.StatusCreated:
+				s.logs.Addf("INFO", "created %s %s via %s: %s", domain, recordType, job.name, maskIP(ip))
+			default:
+				s.logs.Addf("INFO", "unchanged %s %s via %s: %s", domain, recordType, job.name, maskIP(ip))
+			}
 		}
 		status.Results = append(status.Results, record)
 	}
-	if familyOK {
-		s.cache[recordType] = ip
-	}
+	return ok, problems
 }
 
 func (s *Syncer) tryStart() bool {

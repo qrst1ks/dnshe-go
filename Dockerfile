@@ -18,4 +18,4 @@ RUN mkdir -p /data && chown -R app:app /app /data
 USER app
 EXPOSE 9999
 ENTRYPOINT ["dnshe-go"]
-CMD ["-l", ":9999", "-c", "/data/config.json"]
+CMD ["-l", "127.0.0.1:9999", "-c", "/data/config.json"]
